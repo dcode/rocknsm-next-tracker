@@ -1,7 +1,6 @@
 # Design Document
 
-This document captures the design decisions made after discussion in issues. When a design issue is closed, the
-conclusion should be summarized here with a link to the issue.
+This document follows the style used in the [fedora-coreos-tracker](https://github.com/coreos/fedora-coreos-tracker/blob/master/Design.md)
 
 - [OSTree Delivery Format](#ostree-delivery-format)
 - [Release Streams](#release-streams)
@@ -11,87 +10,78 @@ conclusion should be summarized here with a link to the issue.
 - [Cloud Agents](#cloud-agents)
 - [Supported Ignition Versions](#supported-ignition-versions)
 
-## OSTree Delivery Format
-
-- Originally discussed in issue [#23](https://github.com/coreos/fedora-coreos-tracker/issues/23). 
-
 ### Summary:
 
-There are three proposed delivery models for delivering content to
-end user systems:
+RockNSM Next will be a container-based platform, allowing lightweight deployment on a single host using local container runtime (docker or podman) or scaled up deployment across multiple hosts using Kubernetes orchestration.
 
-- OSTree Repo: OSTree commits are stored in an OSTree repo (like a git
-  repo) on a server and fetched via HTTP requests.
-- rojig: uses a special rojig RPM and re-assembles OSTree commit from RPMs
-  already on mirrors.
-- OCI: OSTree commits are packaged up in OCI container images and delivered 
-  via a container registry.
+Eventually, RockNSM will be a customized distribution based upon Fedora/Redhat CoreOS. This means the operating system will be read-only, have SELinux enabled,
+and will perform atomic updates with a recovery partition.
 
-Currently the plan in Fedora CoreOS is to deliver content via a plain
-OSTree Repo and augment our strategy with either rojig or OCI if it
-proves useful or necessary.
+Fedora CoreOS isn't ready yet, however. In the meantime, we will implement the features on CentOS 7, as we do today, but with a very stripped down installation. Any additional tools will be deployed via the container toolbox approach.
+
+This middle stage will have the core operating system delivered via RPM yum repositories. All RockNSM services and additional tooling will be delivered via OCI container repositories.
+
+> ## Discussion
+> We can possibly "defend" using yum through aliases as a simple reminder that
+> users shouldn't use it.
+> ~~~
+> alias yum='echo "Instead of adding software via yum, please stick to the toolbox container pattern. If you really need yum, try \yum"'
+> ~~~
+> {: .source}
+{: .callout}
+
 
 ## Release Streams
 
-- Originally discussed in [#22](https://github.com/coreos/fedora-coreos-tracker/issues/22).
+TODO
 
 ### Production Refs
 
-Fedora CoreOS will have several refs for use on production machines.  At any given time, each ref will be downstream of a particular Fedora branch, and will consist of a snapshot of Fedora packages plus occasionally a backported fix.
-
-- `testing`: Periodic snapshot of the current Fedora release plus Bodhi `updates`.
-- `stable`: Promotion of a `testing` release, including any needed fixes.
-- `next`:
-  1. After Bodhi is enabled for the upcoming Fedora release, tracks that release; before then, tracks `testing`.
-  2. After the upcoming kernel release has reached rc6 and before it goes final, tracks the rawhide kernel.  After the kernel goes final and before it is included in the tracked Fedora release, tracks the kernel from Bodhi `updates-testing`.
-
-All of these refs will be unversioned, in the sense that their names will not include the current Fedora major version.  The stream cadences are not contractual, but will initially have two weeks between releases.  The stream maintenance policies are also not contractual and may evolve from those described above, but changes will preserve the use cases and intended stability of each stream.
-
-Users will be encouraged to run most of their production systems on `stable`, and a few percent of their systems on each of `next` and `testing` to catch regressions before they reach `stable`.
-
-### Development Refs
-
-There will also be some additional unversioned refs for the convenience of Fedora CoreOS developers.  These will be public, but won't be exposed to users in the same way as production refs: they might be in a different repo, or in the same repo but not listed in the summary file.  None of these are contractual; they might go away if we don't find them useful.
-
-- `rawhide`: Nightly snapshot of rawhide.
-- `bodhi-updates`: Nightly snapshot of Bodhi `updates` for the Fedora release currently tracked by `testing`.
-- `bodhi-updates-testing`: Nightly snapshot of Bodhi `updates-testing` for the Fedora release currently tracked by `testing`.
-
-### Out-of-Cycle Releases
-
-Due to the promotion structure described above, `stable` can contain packages that are as much as four weeks out of date.  Sometimes, however, there will be an important bugfix or security fix that cannot wait a month to reach `stable` (or two weeks to reach `next` or `testing`).  In that case, the fix will be incorporated into out-of-cycle releases on affected streams.  These releases will not affect the regular promotion schedules; for example, a fix might sit in `testing` for only a few days before it is promoted to `stable`.
-
-A fix can take one of two forms:
-
-1. An updated package taken directly from Fedora
-2. A minimal fix applied to the package version already present in the affected stream
-
-We'll need infrastructure for both approaches, and the ability to choose between them on a case-by-case basis.  Option 1 is cleaner and easier, but may not always be safe.  Option 2 is especially useful for the kernel, where we'll want to fix individual bugs without pushing an entire stable kernel update directly to the `stable` stream.
-
-If a fix is important enough for an out-of-cycle `stable` release, other affected release streams should be updated as well.
-
-In some cases it may make sense to apply a fix to `testing` but not issue an out-of-cycle release, allowing the fix to be picked up automatically when `testing` promotes to `stable`.
-
-### Deprecation
-
-Because production refs are unversioned, users will seamlessly upgrade between Fedora major releases, so compatibility must be maintained.  Removal of functionality will require explicitly announced deprecations, potentially with long deprecation windows.
+TODO
 
 ## Disk Layout
 
-- Originally discussed in issue [#18](https://github.com/coreos/fedora-coreos-tracker/issues/18). 
-  See also [dustymabe's comment](https://github.com/coreos/fedora-coreos-tracker/issues/18#issuecomment-409668929)
-  summarizing the discussion in the FCOS meeting.
-- Filesystem details were discussed in [#33](https://github.com/coreos/fedora-coreos-tracker/issues/33).
-  We will use XFS by default.
+RockNSM will migrate towards [FHS](https://en.wikipedia.org/wiki/Filesystem_Hierarchy_Standard) compliant filesystem layout. This will make it easier to migrate towards a read-only operating system. As a convenience, we can possibly bind mount new directory paths to their existing paths under `/data`.
+
+The original rational of placing everything under `/data` was to make it easy to purge the sensor. However, currently in CoreOS, it is possible to purge the system to a brand new clean state with the following:
+
+```
+# Remove all user data in the root filesystem
+rm -rf --one-file-system --no-preserve-root /
+# Trigger firstboot
+touch /boot/coreos/first_boot
+```
+
+Now, for sensor data itself (e.g. PCAP, kafka logs, etc), it is still best practice to place those on either another filesystem or some quota limited container volume. This approach will easily facilitate two scripts:
+
+- Purge Data
+- Factory Reset Sensor (as if it's never booted)
+
+Proposed partition layout on GPT formatted disk:
+
+|Part Num | Type | Mount Path | Purpose
+| ---- | ---- | ---- | ---- |
+| 1 | FAT32 | - | Boot Partition/EFI |
+| 2 | XFS | /boot | BIOS boot partition |
+| 3 | XFS | / | root OS partition
+| 4 | XFS | /var | Variable OS data |
+| 5 | XFS | /var/lib/stenographer | _(optional)_ Stenographer data files |
+| 6 | XFS | /var/log/fsf | _(optional)_ FSF log data |
+| 7 | XFS | /var/log/suricata | _(optional)_ Suricata log data |
+| 8 | XFS | /var/log/bro | _(optional)_ Rotated Bro logs |
+| 9 | XFS | /var/spool/bro | _(optional)_ Current Bro logs before rotation |
+| 10 | XFS | /var/lib/elasticsearch | _(optional)_ Elasticsearch state directory |
+| 11 | XFS | /var/lib/kafka | _(optional)_ Kafka state directory |
+| 12 | XFS | /var/spool/docket | _(optional)_ Docket spool directory for temporary PCAP storage |
+
+The optional partitions will be labelled application volumes inside the containers and either bind mounted into the container or attached as external volumes. Other state is relatively minimal and will be retained within the application container as optional container volumes.
+
+**NOTE**: Open to changing this partition layout, but want to align with upstream. Another approach would be some sort of quota-oriented container volumes.
 
 ### Summary:
 
- - FCOS will use a "dd-able" image and ship with a standard partition layout.
  - The bare metal image and cloud images have the same layout.
  - The `/var` and root (`/`) filesystems will be XFS by default.
- - Anaconda will not be used for installation.
- - FCOS should not use the [GPT generator](https://www.freedesktop.org/software/systemd/man/systemd-gpt-auto-generator.html).
- - LVM should be supported, but not used by default.
  - Ignition will be used to customize disk layouts.
 
 FCOS should have a fixed partition layout that Ignition can modify on first boot. The installer will be similar to the
@@ -105,85 +95,49 @@ The partition layout is still undecided, but initial proposals look something li
     2	N/A	Bios Boot partition
     3	XFS	Root
     4	XFS	/var
-
-We also want to support moving the root partition to new locations by recreating the OSTree at the new location. This
-would involve downloading the OSTree repo contents and doing the deploy between the Ignition disks and files stage if
-the root filesystem has changed. This is currently untested.
+    ... potentially others, see **NOTE** above.
 
 ### Open Questions:
 
- - What do we do about 4k sector disks? We could make a "hybrid" disk image, but it technically breaks the GPT spec and
-   may not work with poorly implemented UEFIs.
- - What is the exact partition layout?
- - Do we make /etc a ro bind mount?
-
-## Approach towards shipping Python
-
-- Originally discussed in [#32](https://github.com/coreos/fedora-coreos-tracker/issues/32).
-
-### Summary:
-
-*TL;DR*
-
-Fedora CoreOS group would really like to not ship python, but if we choose
-that we want to keep a tool or a few tools in Fedora CoreOS that use python
-then we should use an approach that makes python only available to the
-operating system and not to end users.
-
-**Note** that this does not say we will ship python.
-
-
-*Details*
-
-Container Linux has not shipped python in the past. Fedora is python
-heavy and thus python has been shipped in the past in Fedora Atomic
-Host. There are several reasons we've identified as reasons to not
-ship python in Fedora CoreOS:
-
-1. prevent users from running scripts directly on the host
-2. prevent shipping/maintaining python
-3. prevent issues where user's python script needs library X that isn't installed
-4. prevent security issues in python requiring a respin
-5. less space used on disk + less data transmitted for updates
-6. better perception we're a minimal OS
-
-Out of those we decided `#1` and `#3` were our primary concerns with
-shipping python. For `#4` we determined there was not a significant
-number of security issues to make shipping python prohibitive. We can
-achieve the goals for `#1` and `#3` by shipping a *system python* that
-is only accessible to operating system tools and not to end users.
+ - Do we use LVM for now (as is the CentOS 7 default) or switch to GPT partitions (as is the FCOS default)? I think switching from an RPM system to OSTree system is going to be destructive anyway, so the point may be moot.
 
 ## Identification in `/etc/os-release`
 
-Originally discussed in [#21](https://github.com/coreos/fedora-coreos-tracker/issues/21).
-
 ### Summary:
 
-We will identify a Fedora CoreOS server using the `ID=fedora` and `VARIANT_ID=coreos`
-fields in the `/etc/os-release` file.
+We will identify a RockNSM platform using the `VARIANT_ID=rocknsm`
+field in the `/etc/os-release` file.
 
 ## Cloud Agents
 
-Originally discussed in [#12](https://github.com/coreos/fedora-coreos-tracker/issues/12).
 
 ### Summary:
 
- - FCOS will not ship cloud agents whenever possible.
- - Some clouds require the OS perform tasks like signaling boot completion. For those we will re-implement that functionality in
-   Ignition or coreos-metadata.
- - For the short term, if we need to include an agent we will bake it into the image. We will not have any specific
-   mechanism for including agents.
-
-### Open questions:
-
- - What do we do about VMware, which has a very involved and intrusive "agent"?
+ - RockNSM needs to support cloud agents for better deployment in offline
+ environments. This is contrary to the FCOS approach, however FCOS does intend to support certain aspects of agents.
+ - We could feasibly extend the installer to add-on cloud agents at install time via container. (vmtoolsd runs fine in a system container, for example).
+ - For the short term, if we need to include an agent we will install it via the RPM in the kickstart %post (as we do now).
 
 ## Supported Ignition Versions
 
-Originally discussed in [#31](https://github.com/coreos/fedora-coreos-tracker/issues/31).
-
 ### Summary:
 
- - FCOS will only support Ignition spec 3.0.0 and up.
- - Ignition spec 3.0.0 will break compatibilty with spec 2.x.y, although most configs will only require minor changes.
- - Tooling should exist to aid converting 2.x.y configs to 3.0.0 configs, although perfect automated translation will not be possible.
+ - RockNSM will only support Ignition spec 3.0.0 and up.
+
+Ignition will provide several desirable features:
+
+- the ability to auto-grow storage on boot, if added to the sensor or VM
+- ability to generate systemd units to start RockNSM services upon reconfiguration
+
+## Services
+
+The primary point of configuration will still be the RockNSM YAML file. Ansible will be responsible for:
+
+- staging container images into a local registry
+- populating service configuration values into `etcd`
+- (single node) creating systemd service files to instantiate services
+- (single node) populating service configuration templates (preferably using `confd`, allowing dynamic reconfig via `etcd`)
+- (single node) allocating service volumes
+- (multi node) create kubernetes pod configs for each service
+- (multi node) generate service configuration templates
+- (multi node) allocate volumes
